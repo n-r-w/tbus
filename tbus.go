@@ -4,9 +4,10 @@
 package tbus
 
 import (
-	"github.com/n-r-w/mbus"
 	"sync"
 	"time"
+
+	"github.com/n-r-w/mbus"
 )
 
 type Event struct {
@@ -68,12 +69,8 @@ func New(parallelCall bool, handlerQueueSize int, pollTime time.Duration, saveFn
 	}
 }
 
-func (b *TranMessageBus) check() {
-	if !b.started {
-		panic("TranMessageBus already started")
-	}
-}
-
+// Start запуск фоновой горутины, читающей события из БД и отправляющей их подписчикам
+// до запуска нельзя проводить никакие операции
 func (b *TranMessageBus) Start() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -87,6 +84,7 @@ func (b *TranMessageBus) Start() {
 	b.started = true
 }
 
+// Stop завершение обработки всех событий, которые уже были взяты в работу и отписка всех подписчиков
 func (b *TranMessageBus) Stop() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -101,6 +99,84 @@ func (b *TranMessageBus) Stop() {
 	b.started = false
 }
 
+// Publish поместить сообщение в топик
+// сообщение сначала попадает в БД в рамках транзакции, чтобы затем быть вычитанным оттуда после завершения этой транзакции
+func (b *TranMessageBus) Publish(tranID any, topic mbus.TopicID, args ...any) error {
+	if tranID == nil {
+		panic("transaction is nil")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	// даем записывать вне зависимости от того, запущена горутина чтения или нет
+	// т.к. в момент остановки могут прилететь новые события и они должны попасть в БД, чтобы быть обработанными при следующем запуске
+	return b.saveFn(tranID, Event{
+		Topic:  topic,
+		Values: args,
+	})
+}
+
+// Subscribe подписаться на события в топике
+func (b *TranMessageBus) Subscribe(topic mbus.TopicID, fn any) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.check()
+
+	return b.bus.Subscribe(topic, fn)
+}
+
+// Unsubscribe описаться от топика
+func (b *TranMessageBus) Unsubscribe(topic mbus.TopicID, fn any) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.check()
+
+	return b.bus.Unsubscribe(topic, fn)
+}
+
+// Close закрыть топик. Все не обработанные события будут потеряны. Лучше не использовать
+func (b *TranMessageBus) Close(topic mbus.TopicID) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.check()
+
+	b.bus.Close(topic)
+}
+
+// BufferSize текущий размер буфера событий в топике. Для мониторинга
+func (b *TranMessageBus) BufferSize(topic mbus.TopicID) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.check()
+
+	return b.bus.BufferSize(topic)
+}
+
+// WaitAndClose закрыть топик, предварительно дождавшись завершения всех обработчиков и освобождения очередей
+func (b *TranMessageBus) WaitAndClose(topic mbus.TopicID) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.check()
+
+	b.bus.WaitAndClose(topic)
+}
+
+// WaitAllAndClose закрыть все топики, предварительно дождавшись завершения всех обработчиков и освобождения очередей
+func (b *TranMessageBus) WaitAllAndClose() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.check()
+
+	b.bus.WaitAllAndClose()
+}
+
+func (b *TranMessageBus) check() {
+	if !b.started {
+		panic("TranMessageBus already started")
+	}
+}
+
+// commitedWorker горутина для чтения закомиченных событий из БД
 func (b *TranMessageBus) commitedWorker() {
 	defer b.closeWg.Done()
 	for {
@@ -125,63 +201,4 @@ func (b *TranMessageBus) commitedWorker() {
 			}
 		}
 	}
-}
-
-func (b *TranMessageBus) Publish(tranID any, topic mbus.TopicID, args ...any) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.check()
-
-	return b.saveFn(tranID, Event{
-		Topic:  topic,
-		Values: args,
-	})
-}
-
-func (b *TranMessageBus) Subscribe(topic mbus.TopicID, fn any) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.check()
-
-	return b.bus.Subscribe(topic, fn)
-}
-
-func (b *TranMessageBus) Unsubscribe(topic mbus.TopicID, fn any) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.check()
-
-	return b.bus.Unsubscribe(topic, fn)
-}
-
-func (b *TranMessageBus) Close(topic mbus.TopicID) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.check()
-
-	b.bus.Close(topic)
-}
-
-func (b *TranMessageBus) BufferSize(topic mbus.TopicID) int {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.check()
-
-	return b.bus.BufferSize(topic)
-}
-
-func (b *TranMessageBus) WaitAndClose(topic mbus.TopicID) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.check()
-
-	b.bus.WaitAndClose(topic)
-}
-
-func (b *TranMessageBus) WaitAllAndClose() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.check()
-
-	b.bus.WaitAllAndClose()
 }
