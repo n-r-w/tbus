@@ -120,7 +120,6 @@ func (b *TranMessageBus) Publish(tranID any, topic mbus.TopicID, args ...any) er
 func (b *TranMessageBus) Subscribe(topic mbus.TopicID, fn any) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.check()
 
 	return b.bus.Subscribe(topic, fn)
 }
@@ -129,7 +128,6 @@ func (b *TranMessageBus) Subscribe(topic mbus.TopicID, fn any) error {
 func (b *TranMessageBus) Unsubscribe(topic mbus.TopicID, fn any) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.check()
 
 	return b.bus.Unsubscribe(topic, fn)
 }
@@ -138,7 +136,6 @@ func (b *TranMessageBus) Unsubscribe(topic mbus.TopicID, fn any) error {
 func (b *TranMessageBus) Close(topic mbus.TopicID) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.check()
 
 	b.bus.Close(topic)
 }
@@ -147,7 +144,6 @@ func (b *TranMessageBus) Close(topic mbus.TopicID) {
 func (b *TranMessageBus) BufferSize(topic mbus.TopicID) int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.check()
 
 	return b.bus.BufferSize(topic)
 }
@@ -172,7 +168,7 @@ func (b *TranMessageBus) WaitAllAndClose() {
 
 func (b *TranMessageBus) check() {
 	if !b.started {
-		panic("TranMessageBus already started")
+		panic("TranMessageBus not started")
 	}
 }
 
